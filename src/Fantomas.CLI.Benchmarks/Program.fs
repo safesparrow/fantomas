@@ -6,5 +6,5 @@ open Fantomas.CLI.Benchmarks.Runners
 
 [<EntryPoint>]
 let main _ =
-    BenchmarkRunner.Run(Assembly.GetExecutingAssembly()) |> ignore
+    BenchmarkRunner.Run(Assembly.GetAssembly(typeof<ColdStart>)) |> ignore
     0

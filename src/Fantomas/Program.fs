@@ -383,9 +383,7 @@ let main argv =
             | Op.CreateDirectory dir -> failwith $"Unexpected operation CreateDirectory at this stage")
         |> fun tasks ->
             if processInParallel then
-                tasks
-                |> Async.Parallel
-                |> Async.RunSynchronously
+                tasks |> Async.Parallel |> Async.RunSynchronously
             else
                 tasks |> Array.map Async.RunSynchronously
         |> ignore
@@ -393,7 +391,7 @@ let main argv =
     if Option.isSome version then
         let version = CodeFormatter.GetVersion()
         printfn $"Fantomas v%s{version}"
-    elif processInParallel then
+    elif isDaemon then
         let daemon =
             new FantomasDaemon(Console.OpenStandardOutput(), Console.OpenStandardInput())
 
@@ -405,6 +403,7 @@ let main argv =
         inputPath |> runCheckCommand recurse |> exit
     else
         let go = go processInParallel
+
         try
             match inputPath, outputPath with
             | InputPath.NoFSharpFile s, _ ->
