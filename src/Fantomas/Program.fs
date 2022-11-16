@@ -76,14 +76,21 @@ let rec allFiles isRec path =
          else
              SearchOption.TopDirectoryOnly)
 
-    Directory.GetFiles(path, "*.*", searchOption)
-    // |> Seq.filter (fun f ->
-    //     isFSharpFile f
-    //     && not (isInExcludedDir f)
-    //     && not (IgnoreFile.isIgnoredFile (IgnoreFile.current.Force()) f))
-    |> Seq.toArray
-    |> Seq.toArray
-    |> Array.chunkBySize 50
+    Directory.GetDirectories(path, "*.*", SearchOption.TopDirectoryOnly)
+    |> fun dirs ->
+        if not isRec then
+            dirs
+        else
+            dirs
+            |> Array.map (fun dir -> async { return Directory.GetDirectories(dir, "*.*", SearchOption.AllDirectories) })
+            |> Async.Parallel
+            |> Async.RunSynchronously
+            |> Array.concat
+    |> Array.map (fun dir -> async { return Directory.GetFiles(dir, "*.*", SearchOption.TopDirectoryOnly) })
+    |> Async.Parallel
+    |> Async.RunSynchronously
+    |> Array.concat
+    |> Array.chunkBySize 20
     |> Array.map (fun files ->
         async {
             return

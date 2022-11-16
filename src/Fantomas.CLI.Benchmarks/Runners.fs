@@ -23,14 +23,14 @@ type ColdStart() =
     [<GcServer(true)>]
     member _.CheckSequentialServerGc() = test false
 
-    [<Benchmark>]
-    [<GcServer(false)>]
-    member _.CheckSequentialWorkstationGc() = test false
+    // [<Benchmark>]
+    // [<GcServer(false)>]
+    // member _.CheckSequentialWorkstationGc() = test false
 
     [<Benchmark>]
     [<GcServer(true)>]
     member _.CheckInParallelServerGc() = test true
-
-    [<Benchmark>]
-    [<GcServer(false)>]
-    member _.CheckInParallelWorkstationGc() = test true
+//
+// [<Benchmark>]
+// [<GcServer(false)>]
+// member _.CheckInParallelWorkstationGc() = test true
