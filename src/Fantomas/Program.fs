@@ -349,10 +349,12 @@ let main argv =
         files @ folders
 
     let processFile force inputFile outputFile =
-        printfn "[%d] Processing %s" (System.Threading.Thread.CurrentThread.ManagedThreadId) inputFile
-        let content = File.ReadAllText inputFile
-        let config = EditorConfig.readConfiguration inputFile
-        stringToFile force content inputFile config
+        async {
+            printfn "[%d] Processing %s" (System.Threading.Thread.CurrentThread.ManagedThreadId) inputFile
+            let content = File.ReadAllText inputFile
+            let config = EditorConfig.readConfiguration inputFile
+            return! stringToFile force content inputFile config
+        }
 
     let check = results.Contains <@ Arguments.Check @>
     let isDaemon = results.Contains <@ Arguments.Daemon @>

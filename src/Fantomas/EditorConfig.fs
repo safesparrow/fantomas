@@ -2,6 +2,7 @@ module Fantomas.EditorConfig
 
 open System.Collections.Generic
 open System.ComponentModel
+open System.IO
 open Fantomas.Core.FormatConfig
 
 module Reflection =
@@ -108,9 +109,33 @@ let configToEditorConfig (config: FormatConfig) : string =
 
 let private editorConfigParser = EditorConfig.Core.EditorConfigParser()
 
+let memoize (f: 'a -> 'b) : 'a -> 'b =
+    let cache = Dictionary<'a, 'b>()
+
+    fun a ->
+        match cache.TryGetValue a with
+        | true, b -> b
+        | false, _ ->
+            let b = f a
+            cache[a] <- b
+            b
+
+let parseConfigCached =
+    let configsForDir =
+        fun (dir: string) ->
+            printfn $"HELLO Get dir config: {dir}"
+            editorConfigParser.GetConfigurationFilesTillRoot(dir + "/dummy_file.txt")
+        |> memoize
+
+    fun (fileName: string) ->
+        printfn $"HELLO Get FILE config: {fileName}"
+        let dir = Path.GetDirectoryName fileName
+        let configs = configsForDir dir
+        editorConfigParser.Parse(fileName, configs)
+
 let tryReadConfiguration (fsharpFile: string) : FormatConfig option =
     let editorConfigSettings: EditorConfig.Core.FileConfiguration =
-        editorConfigParser.Parse(fileName = fsharpFile)
+        parseConfigCached fsharpFile
 
     if editorConfigSettings.Properties.Count = 0 then
         None
