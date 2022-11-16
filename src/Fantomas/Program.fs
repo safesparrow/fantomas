@@ -81,6 +81,24 @@ let rec allFiles isRec path =
         isFSharpFile f
         && not (isInExcludedDir f)
         && not (IgnoreFile.isIgnoredFile (IgnoreFile.current.Force()) f))
+// |> Seq.toArray
+// |> Seq.toArray
+// |> Array.chunkBySize 50
+// |> Array.map (fun files ->
+//     async {
+//         return
+//             files
+//             |> Array.filter (fun f ->
+//                 isFSharpFile f
+//                 && not (isInExcludedDir f)
+//                 && not (IgnoreFile.isIgnoredFile (IgnoreFile.current.Force()) f)
+//             )
+//     }
+// )
+// |> Array.map Async.RunSynchronously
+// // |>  Async.Parallel
+// // |> Async.RunSynchronously
+// |> Array.concat
 
 /// Fantomas assumes the input files are UTF-8
 /// As is stated in F# language spec: https://fsharp.org/specs/language-spec/4.1/FSharpSpec-4.1-latest.pdf#page=25

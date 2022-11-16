@@ -1,5 +1,6 @@
 module Fantomas.EditorConfig
 
+open System.Collections.Concurrent
 open System.Collections.Generic
 open System.ComponentModel
 open System.IO
@@ -110,7 +111,7 @@ let configToEditorConfig (config: FormatConfig) : string =
 let private editorConfigParser = EditorConfig.Core.EditorConfigParser()
 
 let memoize (f: 'a -> 'b) : 'a -> 'b =
-    let cache = Dictionary<'a, 'b>()
+    let cache = ConcurrentDictionary<'a, 'b>()
 
     fun a ->
         match cache.TryGetValue a with
