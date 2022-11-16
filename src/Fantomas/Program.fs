@@ -6,6 +6,7 @@ open Fantomas.Daemon
 open Argu
 open System.Text
 open Fantomas.Format
+open Microsoft.FSharp.Collections
 
 let extensions = set [| ".fs"; ".fsx"; ".fsi"; ".ml"; ".mli" |]
 
@@ -16,6 +17,7 @@ type Arguments =
     | [<Unique>] Out of string
     | [<Unique>] Check
     | [<Unique>] Daemon
+    | [<Unique>] Parallel
     | [<Unique; AltCommandLine("-v")>] Version
     | [<MainCommand>] Input of string list
 
@@ -31,6 +33,7 @@ type Arguments =
                 "Don't format files, just check if they have changed. Exits with 0 if it's formatted correctly, with 1 if some files need formatting and 99 if there was an internal error"
             | Daemon -> "Daemon mode, launches an LSP-like server to can be used by editor tooling."
             | Version -> "Displays the version of Fantomas"
+            | Parallel -> "Process files in parallel"
             | Input _ ->
                 sprintf
                     "Input paths: can be multiple folders or files with %s extension."
@@ -95,13 +98,13 @@ let private hasByteOrderMark file =
 
 /// Format a source string using given config and write to a text writer
 let processSourceString (force: bool) s (fileName: string) config =
-    let writeResult (formatted: string) =
-        if hasByteOrderMark fileName then
-            File.WriteAllText(fileName, formatted, Encoding.UTF8)
-        else
-            File.WriteAllText(fileName, formatted)
-
-        printfn $"%s{fileName} has been written."
+    let writeResult (formatted: string) = ()
+    // if hasByteOrderMark fileName then
+    //     File.WriteAllText(fileName, formatted, Encoding.UTF8)
+    // else
+    //     File.WriteAllText(fileName, formatted)
+    //
+    // printfn $"%s{fileName} has been written."
 
     async {
         let! formatted = s |> Format.formatContentAsync config fileName
@@ -116,7 +119,6 @@ let processSourceString (force: bool) s (fileName: string) config =
         | Format.FormatResult.Error(_, ex) -> raise ex
         | Format.InvalidCode(file, _) -> raise (exn $"Formatting {file} lead to invalid F# code")
     }
-    |> Async.RunSynchronously
 
 /// Format inFile and write to text writer
 let processSourceFile (force: bool) inFile (tw: TextWriter) =
@@ -211,8 +213,17 @@ let runCheckCommand (recurse: bool) (inputPath: InputPath) : int =
 
         allFilesToCheck |> check |> processCheckResult
 
+type Force = bool
+
+type Op =
+    | File of Force * string * string
+    | IgnoredFile of string
+    | CreateDirectory of string
+
 [<EntryPoint>]
 let main argv =
+    Environment.CurrentDirectory <- "c:/projekty/fsharp/fsharp_main"
+
     let errorHandler =
         ProcessExiter(
             colorizer =
@@ -298,59 +309,91 @@ let main argv =
             reraise ()
 
     let stringToFile (force: bool) (s: string) (outFile: string) config =
-        try
-            if profile then
-                printfn "Line count: %i" (s.Length - s.Replace(Environment.NewLine, "").Length)
+        processSourceString force s outFile config
 
-                time (fun () -> processSourceString force s outFile config)
-            else
-                processSourceString force s outFile config
-        with exn ->
-            reraise ()
+    let collectFile force inputFile outputFile = Op.File(force, inputFile, outputFile)
+
+    let collectFolder force inputFolder outputFolder =
+        seq {
+            if not <| Directory.Exists(outputFolder) then
+                yield Op.CreateDirectory outputFolder
+
+            yield!
+                allFiles recurse inputFolder
+                |> Seq.map (fun i ->
+                    // s supposes to have form s1/suffix
+                    let suffix = i.Substring(inputFolder.Length + 1)
+
+                    let o =
+                        if inputFolder <> outputFolder then
+                            Path.Combine(outputFolder, suffix)
+                        else
+                            i
+
+                    Op.File(force, i, o))
+        }
+        |> Seq.toList
+
+    let collectFilesAndFolders force (files: string list) (folders: string list) : Op list =
+        let files =
+            files
+            |> List.map (fun file ->
+                if (IgnoreFile.isIgnoredFile (IgnoreFile.current.Force()) file) then
+                    Op.IgnoredFile file
+                else
+                    Op.File(force, file, file))
+
+        let folders =
+            folders |> List.collect (fun folder -> collectFolder force folder folder)
+
+        files @ folders
 
     let processFile force inputFile outputFile =
-        if inputFile <> outputFile then
-            fileToFile force inputFile outputFile
-        else
-            printfn "Processing %s" inputFile
-            let content = File.ReadAllText inputFile
-            let config = EditorConfig.readConfiguration inputFile
-            stringToFile force content inputFile config
-
-    let processFolder force inputFolder outputFolder =
-        if not <| Directory.Exists(outputFolder) then
-            Directory.CreateDirectory(outputFolder) |> ignore
-
-        allFiles recurse inputFolder
-        |> Seq.iter (fun i ->
-            // s supposes to have form s1/suffix
-            let suffix = i.Substring(inputFolder.Length + 1)
-
-            let o =
-                if inputFolder <> outputFolder then
-                    Path.Combine(outputFolder, suffix)
-                else
-                    i
-
-            processFile force i o)
-
-    let filesAndFolders force (files: string list) (folders: string list) : unit =
-        files
-        |> List.iter (fun file ->
-            if (IgnoreFile.isIgnoredFile (IgnoreFile.current.Force()) file) then
-                printfn "'%s' was ignored" file
-            else
-                processFile force file file)
-
-        folders |> List.iter (fun folder -> processFolder force folder folder)
+        printfn "[%d] Processing %s" (System.Threading.Thread.CurrentThread.ManagedThreadId) inputFile
+        let content = File.ReadAllText inputFile
+        let config = EditorConfig.readConfiguration inputFile
+        stringToFile force content inputFile config
 
     let check = results.Contains <@ Arguments.Check @>
     let isDaemon = results.Contains <@ Arguments.Daemon @>
+    let processInParallel = results.Contains <@ Arguments.Parallel @>
+
+    let go (processInParallel: bool) (ops: Op list) : unit =
+        let _lock = obj ()
+
+        ops
+        |> List.choose (function
+            | Op.CreateDirectory dir -> Some dir
+            | _ -> None)
+        |> List.iter (fun outputFolder -> Directory.CreateDirectory(outputFolder) |> ignore)
+
+        ops
+        |> List.toArray
+        // Order files by Length Descending, so that biggest files are processed first.
+        |> Array.Parallel.map (fun op ->
+            match op with
+            | Op.File(b, s, s1) -> FileInfo(s).Length, op
+            | _ -> 1000000000, op)
+        |> Array.sortByDescending fst
+        |> Array.map snd
+        |> Array.map (fun op ->
+            match op with
+            | Op.File(b, s, s1) -> processFile b s s1
+            | Op.IgnoredFile s -> async { printfn $"'%s{s}' was ignored" }
+            | Op.CreateDirectory dir -> failwith $"Unexpected operation CreateDirectory at this stage")
+        |> fun tasks ->
+            if processInParallel then
+                tasks
+                |> Async.Parallel
+                |> Async.RunSynchronously
+            else
+                tasks |> Array.map Async.RunSynchronously
+        |> ignore
 
     if Option.isSome version then
         let version = CodeFormatter.GetVersion()
         printfn $"Fantomas v%s{version}"
-    elif isDaemon then
+    elif processInParallel then
         let daemon =
             new FantomasDaemon(Console.OpenStandardOutput(), Console.OpenStandardInput())
 
@@ -361,6 +404,7 @@ let main argv =
     elif check then
         inputPath |> runCheckCommand recurse |> exit
     else
+        let go = go processInParallel
         try
             match inputPath, outputPath with
             | InputPath.NoFSharpFile s, _ ->
@@ -374,11 +418,12 @@ let main argv =
                 exit 1
             | InputPath.File f, _ when (IgnoreFile.isIgnoredFile (IgnoreFile.current.Force()) f) ->
                 printfn "'%s' was ignored" f
-            | InputPath.Folder p1, OutputPath.NotKnown -> processFolder force p1 p1
-            | InputPath.File p1, OutputPath.NotKnown -> processFile force p1 p1
-            | InputPath.File p1, OutputPath.IO p2 -> processFile force p1 p2
-            | InputPath.Folder p1, OutputPath.IO p2 -> processFolder force p1 p2
-            | InputPath.Multiple(files, folders), OutputPath.NotKnown -> filesAndFolders force files folders
+            | InputPath.File p1, OutputPath.NotKnown -> processFile force p1 p1 |> Async.RunSynchronously
+            | InputPath.File p1, OutputPath.IO p2 -> processFile force p1 p2 |> Async.RunSynchronously
+            | InputPath.Folder p1, OutputPath.NotKnown -> collectFolder force p1 p1 |> go
+            | InputPath.Folder p1, OutputPath.IO p2 -> [ Op.File(force, p1, p2) ] |> go
+            | InputPath.Multiple(files, folders), OutputPath.NotKnown ->
+                collectFilesAndFolders force files folders |> go
             | InputPath.Multiple _, OutputPath.IO _ ->
                 eprintfn "Multiple input files are not supported with the --out flag."
                 exit 1
