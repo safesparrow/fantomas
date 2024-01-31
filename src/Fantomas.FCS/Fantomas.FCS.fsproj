@@ -310,7 +310,7 @@
     <PackageReference Include="FsLexYacc" PrivateAssets="all" />
   </ItemGroup>
 
-  <Target Name="AcquireCompilerFiles" Condition="!Exists('../../.deps/$(FCSCommitHash)')" BeforeTargets="CollectPackageReferences">
+  <Target Name="AcquireCompilerFiles" Condition="!Exists('../../.deps/$(FCSCommitHash)')" BeforeTargets="CollectPackageReferences;ResolveProjectReferences;BeforeBuild">
     <Exec Command="dotnet fsi ../../build.fsx -p Init" />
   </Target>
 </Project>
